@@ -1,7 +1,7 @@
 # --- FastAPI stack ---
 fastapi==0.118.0
 starlette==0.48.0
-uvicorn==0.37.0
+uvicorn[standard]==0.37.0
 gunicorn==22.0.0
 
 # --- File upload / images ---
@@ -30,4 +30,3 @@ grpcio==1.75.1
 grpcio-tools==1.75.1
 protobuf==6.32.1
 googleapis-common-protos==1.70.0
-websockets==12.0
