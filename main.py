@@ -28,7 +28,7 @@ app.mount("/", StaticFiles(directory="."), name="static")
 # --- 루트 경로 핸들러 수정 ---
 @app.get("/")
 def read_root():
-    return HTMLResponse(content=open("index.html", "r").read(), status_code=200)
+    return HTMLResponse(open("index.html","r").read())
 
 # --- 기존 이미지 업로드 설정 ---
 UPLOAD_DIR = Path("uploads")
