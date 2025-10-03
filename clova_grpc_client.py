@@ -13,7 +13,7 @@ class ClovaSpeechClient:
             raise ValueError("CLOVA API Key가 필요합니다.")
         
         # 실제 gRPC 엔드포인트 주소로 변경해야 합니다.
-        self.target_url = "clovaspeech-gw.ncloud.com:50051"
+        self.target_url = "clovaspeech-gw.ncloud.com:443"
         
         # 인증 메타데이터 생성
         self.metadata = [
@@ -61,4 +61,5 @@ class ClovaSpeechClient:
     async def close(self):
         """gRPC 채널을 닫습니다."""
         if self.channel:
+
             await self.channel.close()
