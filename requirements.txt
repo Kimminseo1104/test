@@ -1,6 +1,7 @@
 # FastAPI and Uvicorn
 fastapi==0.118.0
 uvicorn==0.37.0
+gunicorn==22.0.0
 
 # Image Upload Dependencies
 python-multipart==0.0.9
