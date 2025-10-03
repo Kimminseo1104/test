@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>실시간 음성 스트리밍 테스트</title>
   <style>
-    :root { --bg:#0b0d10; --panel:#12161b; --text:#e7efff; --muted:#7e8b9f; --acc:#4da3ff; }
+    :root { --bg:#0b0d10; --panel:#12161b; --text:#e7efff; --muted:#7e8b9f; --acc:#4da3ff; --red:#ff5c5c; --green:#32d74b; --amber:#ffd166; }
     * { box-sizing: border-box }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif; background:var(--bg); color:var(--text) }
+    body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',sans-serif; background:var(--bg); color:var(--text) }
     header { padding:20px 16px; border-bottom:1px solid #1d2430; background:linear-gradient(180deg,#0f1318,transparent) }
     main { max-width: 920px; margin: 0 auto; padding: 24px 16px 60px }
     h1 { margin:0 0 6px; font-size: 22px }
@@ -19,7 +19,7 @@
       padding:10px 12px; font-size:14px; outline:none;
     }
     .row { display:grid; grid-template-columns: 1fr 200px; gap:12px }
-    .btns { display:flex; gap:10px; margin-top:12px }
+    .btns { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap: wrap; }
     button {
       cursor:pointer; border:1px solid #243145; background:#162033; color:#cfe4ff; border-radius:12px;
       padding:10px 14px; font-weight:600; transition: transform .02s ease-in-out, background .2s;
@@ -27,15 +27,20 @@
     button:hover { background:#1b2a41 }
     button:active { transform: translateY(1px) }
     button[disabled] { opacity:.5; cursor:not-allowed }
-    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0a0e14; color:#8fbcff;
+    .log { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#0a0e14; color:#8fbcff;
       border:1px solid #1c2433; border-radius:12px; padding:12px; min-height:160px; white-space:pre-wrap; overflow:auto }
     .status { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; margin:6px 0 0 }
     .dot { width:10px; height:10px; border-radius:50%; background:#5a6473 }
-    .dot.on { background:#32d74b; box-shadow:0 0 0 3px rgba(50,215,75,.12) }
+    .dot.on { background:var(--green); box-shadow:0 0 0 3px rgba(50,215,75,.12) }
     .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#0e1829; border:1px solid #20314a; color:#b8d7ff; font-size:12px }
     .result { background:#0c1118; border:1px dashed #223146; border-radius:12px; padding:12px; margin-top:10px }
     .final { color:#d7ffe3 }
     .interim { color:#b8d7ff }
+    .metrics { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px }
+    .metric { font-size:12px; color:#c6d9f7; border:1px solid #223146; background:#0b1424; padding:4px 8px; border-radius:10px }
+    .banner { margin-top:10px; padding:10px 12px; border-radius:12px; font-size:14px; display:none }
+    .banner.err { background:#2a0f12; border:1px solid #4a1b20; color:#ffb3b3; }
+    .banner.ok  { background:#0f1f14; border:1px solid #1e3a26; color:#b8ffd0; }
     .footer { margin-top:16px; font-size:13px; color:#92a2ba }
     a { color:var(--acc); text-decoration:none }
     .links { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px }
@@ -49,6 +54,9 @@
 
   <main>
     <div class="card">
+      <div id="bannerErr" class="banner err"></div>
+      <div id="bannerOk"  class="banner ok"></div>
+
       <div class="row">
         <div>
           <label>WebSocket URL (자동 완성됨, 필요시 수정)</label>
@@ -71,6 +79,12 @@
         <button id="btnStop" disabled>⏹ Stop</button>
         <span class="status"><span id="wsDot" class="dot"></span> <span id="wsStatus">Disconnected</span></span>
         <span class="pill" id="fmtInfo">PCM: 16kHz • mono • S16LE</span>
+      </div>
+
+      <div class="metrics">
+        <span class="metric">⏱ <span id="mDur">00:00</span></span>
+        <span class="metric">⬆ sent <span id="mBytes">0</span> B</span>
+        <span class="metric">📈 <span id="mRate">0</span> B/s</span>
       </div>
 
       <div class="result" id="resultBox">
@@ -106,13 +120,23 @@
     const logEl     = document.getElementById('log');
     const finalEl   = document.getElementById('final');
     const interimEl = document.getElementById('interim');
+    const bannerErr = document.getElementById('bannerErr');
+    const bannerOk  = document.getElementById('bannerOk');
+    const mDur      = document.getElementById('mDur');
+    const mBytes    = document.getElementById('mBytes');
+    const mRate     = document.getElementById('mRate');
 
     // ------------ State ------------
     let ws = null;
     let audioCtx = null;
     let workletNode = null;
     let stream = null;
-    let useProcessorFallback = false; // AudioWorklet 미지원 시 ScriptProcessor 대체
+    let useProcessorFallback = false;
+    let startTs = 0, timerId = null, sentBytes = 0, lastBytes = 0;
+
+    function showErr(msg) { bannerErr.style.display='block'; bannerErr.textContent = '⚠ ' + msg; }
+    function hideErr()    { bannerErr.style.display='none'; bannerErr.textContent = ''; }
+    function showOk(msg)  { bannerOk.style.display='block';  bannerOk.textContent = '✅ ' + msg; setTimeout(()=>{bannerOk.style.display='none';}, 2500); }
 
     function log(msg) {
       const now = new Date().toLocaleTimeString();
@@ -125,24 +149,34 @@
     }
     function defaultWsUrl(lang) {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      // 같은 호스트 기준 상대 경로로 /ws/transcribe/stream 사용
       return `${proto}://${location.host}/ws/transcribe/stream?lang=${encodeURIComponent(lang)}`;
     }
+    function fmtDur(ms) {
+      const s = Math.floor(ms/1000), m = Math.floor(s/60), ss = s%60;
+      return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+    }
+    function startMeter() {
+      startTs = Date.now(); sentBytes = 0; lastBytes = 0;
+      timerId = setInterval(()=>{
+        const dur = Date.now() - startTs;
+        mDur.textContent = fmtDur(dur);
+        mBytes.textContent = sentBytes.toLocaleString();
+        const rate = Math.max(0, sentBytes - lastBytes);
+        mRate.textContent = rate.toLocaleString();
+        lastBytes = sentBytes;
+      }, 1000);
+    }
+    function stopMeter() { if (timerId) clearInterval(timerId); timerId = null; }
 
     // 초기 URL 채우기
     wsUrlEl.value = defaultWsUrl(langEl.value);
     langEl.addEventListener('change', () => {
-      // 언어 바꾸면 URL도 업데이트
-      try {
-        const u = new URL(wsUrlEl.value);
-        u.searchParams.set('lang', langEl.value);
-        wsUrlEl.value = u.toString();
-      } catch {
-        wsUrlEl.value = defaultWsUrl(langEl.value);
-      }
+      try { const u = new URL(wsUrlEl.value); u.searchParams.set('lang', langEl.value); wsUrlEl.value = u.toString(); }
+      catch { wsUrlEl.value = defaultWsUrl(langEl.value); }
     });
 
     async function start() {
+      hideErr();
       btnStart.disabled = true; btnStop.disabled = false;
       finalEl.textContent = ''; interimEl.textContent = '';
       const url = wsUrlEl.value.trim();
@@ -150,31 +184,27 @@
       // 1) WebSocket 연결
       ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => { setWS(true); log('WS ✅ connected'); };
-      ws.onclose = () => { setWS(false); log('WS ❌ closed'); stop(true); };
-      ws.onerror = (e) => { log('WS error: ' + e.message || e); };
+      ws.onopen = () => { setWS(true); log('WS ✅ connected'); showOk('WebSocket 연결 성공'); startMeter(); };
+      ws.onclose = () => { setWS(false); log('WS ❌ closed'); stop(true); showErr('WebSocket 연결이 종료되었습니다.'); stopMeter(); };
+      ws.onerror = (e) => { log('WS error: ' + (e?.message || e)); showErr('WebSocket 오류: ' + (e?.message || 'unknown')); };
+
       ws.onmessage = (e) => {
         try {
           const obj = JSON.parse(e.data);
-          if (obj.error) {
-            log('Server error: ' + obj.error);
-            return;
-          }
-          // 서버가 { text, is_final } 형태로 보냄
+          if (obj.debug) { log('DEBUG: ' + obj.debug); return; }
+          if (obj.error) { log('Server error: ' + obj.error); showErr(obj.error); return; }
+
           if (obj.text !== undefined) {
             if (obj.is_final) {
-              // 최종 문장 누적
               finalEl.textContent = (finalEl.textContent + ' ' + obj.text).trim();
               interimEl.textContent = '';
             } else {
-              // 중간(부분) 결과
               interimEl.textContent = obj.text;
             }
           } else {
             log('RX: ' + e.data);
           }
         } catch {
-          // 바이너리/텍스트 혼합일 경우
           log('RX(bin): ' + (e.data && e.data.byteLength ? e.data.byteLength+'B' : 'text'));
         }
       };
@@ -187,6 +217,7 @@
         });
       } catch (err) {
         log('마이크 권한 실패: ' + err);
+        showErr('마이크 권한을 허용해 주세요.');
         stop();
         return;
       }
@@ -195,40 +226,20 @@
       const SR_OUT = 16000;
 
       try {
-        // AudioWorklet 우선
+        // AudioWorklet
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
         const workletCode = `
           class Downsample16kProcessor extends AudioWorkletProcessor {
-            constructor() {
-              super();
-              this._ratio = sampleRate / 16000;
-              this._acc = 0;
-              this._cnt = 0;
-            }
-            process(inputs) {
-              const input = inputs[0];
-              if (!input || input.length === 0) return true;
-              const ch = input[0];
-              if (!ch) return true;
-
-              // 간단 평균 다운샘플링 → S16LE
-              const inData = ch;
-              const outLen = Math.floor(inData.length / this._ratio);
-              const out = new Int16Array(outLen);
-              let o = 0;
-              for (let i=0;i<inData.length;i++) {
-                this._acc += inData[i];
-                this._cnt++;
-                if (this._cnt >= this._ratio) {
-                  const sample = this._acc / this._cnt;
-                  const s = Math.max(-1, Math.min(1, sample));
-                  out[o++] = (s * 32767) | 0;
-                  this._acc = 0; this._cnt = 0;
-                }
-              }
-              const ab = out.buffer;
-              this.port.postMessage(ab, [ab]);
-              return true;
+            constructor(){ super(); this._ratio = sampleRate/16000; this._acc = 0; this._cnt = 0; }
+            process(inputs){
+              const input = inputs[0]; if(!input || input.length===0) return true;
+              const ch = input[0]; if(!ch) return true;
+              const inData = ch; const outLen = Math.floor(inData.length/this._ratio);
+              const out = new Int16Array(outLen); let o=0;
+              for(let i=0;i<inData.length;i++){ this._acc += inData[i]; this._cnt++;
+                if(this._cnt >= this._ratio){ const s = Math.max(-1, Math.min(1, this._acc/this._cnt));
+                  out[o++] = (s * 32767) | 0; this._acc = 0; this._cnt = 0; } }
+              const ab = out.buffer; this.port.postMessage(ab, [ab]); return true;
             }
           }
           registerProcessor('downsample-16k', Downsample16kProcessor);
@@ -240,16 +251,18 @@
         const source = audioCtx.createMediaStreamSource(stream);
         workletNode = new AudioWorkletNode(audioCtx, 'downsample-16k');
         workletNode.port.onmessage = (e) => {
-          if (ws && ws.readyState === 1) ws.send(e.data); // ArrayBuffer
+          // 전송 전 버퍼가 너무 쌓이면 잠깐 쉰다 (네트워크 혼잡 방지)
+          if (ws && ws.readyState === 1) {
+            if (ws.bufferedAmount > 512*1024) return; // 512KB 이상 쌓였으면 skip 1 frame
+            ws.send(e.data);
+            sentBytes += (e.data?.byteLength || 0);
+          }
         };
 
         source.connect(workletNode);
-        // 모니터링 원치 않으면 출력 연결 생략
-        // workletNode.connect(audioCtx.destination);
-
         log(`AudioWorklet on. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE`);
       } catch (err) {
-        // AudioWorklet 미지원 → ScriptProcessorNode 대체 (deprecated이지만 폭넓은 호환)
+        // ScriptProcessor 폴백
         useProcessorFallback = true;
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
         const source = audioCtx.createMediaStreamSource(stream);
@@ -263,19 +276,22 @@
           const out = new Int16Array(outLen);
           let o = 0;
           for (let i=0;i<input.length;i++) {
-            acc += input[i];
-            cnt++;
+            acc += input[i]; cnt++;
             if (cnt >= ratio) {
               const s = Math.max(-1, Math.min(1, acc / cnt));
               out[o++] = (s * 32767) | 0;
               acc = 0; cnt = 0;
             }
           }
-          if (ws && ws.readyState === 1) ws.send(out.buffer);
+          if (ws && ws.readyState === 1) {
+            if (ws.bufferedAmount > 512*1024) return;
+            ws.send(out.buffer);
+            sentBytes += out.byteLength;
+          }
         };
 
         source.connect(processor);
-        processor.connect(audioCtx.destination); // 필요 없으면 끊어도 됨
+        processor.connect(audioCtx.destination);
         log(`AudioWorklet fallback. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE`);
       }
 
@@ -298,7 +314,8 @@
       try { if (ws && ws.readyState === 1) ws.close(); } catch {}
       ws = null;
 
-      if (!silent) log('🔚 stopped');
+      stopMeter();
+      if (!silent) { log('🔚 stopped'); }
     }
 
     btnStart.addEventListener('click', start);
