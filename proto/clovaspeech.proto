@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package ncloud.ai.clovaspeech.v1;
+
+service ClovaSpeechRecognizer {
+  // Bi-directional streaming RPC for speech recognition.
+  rpc Recognize (stream RecognitionRequest) returns (stream RecognitionResponse);
+}
+
+// The top-level message sent by the client for the `Recognize` method.
+// Multiple `RecognitionRequest` messages are sent. The first message
+// must contain a `config` message and must not contain `audio_content`.
+// All subsequent messages must contain `audio_content` and must not contain
+// a `config` message.
+message RecognitionRequest {
+  oneof streaming_request {
+    RecognitionConfig config = 1;
+    bytes audio_content = 2;
+  }
+}
+
+// The top-level message sent by the server for the `Recognize` method.
+message RecognitionResponse {
+  oneof streaming_response {
+    SpeechRecognitionResult result = 1;
+    Error error = 2;
+  }
+}
+
+// Provides information to the recognizer that specifies how to process the
+// request.
+message RecognitionConfig {
+  enum AudioEncoding {
+    option allow_alias = true;
+    ENCODING_UNSPECIFIED = 0;
+    LINEAR16 = 1; // 16-bit linear PCM audio.
+    PCM = 1;
+    OGG_OPUS = 6;
+    MP3 = 8;
+  }
+
+  string language = 1; // e.g., "ko-KR", "en-US"
+  AudioEncoding encoding = 2;
+  int32 sample_rate_hertz = 3; // Sample rate in Hertz.
+  bool word_alignment = 6;
+  bool full_text = 10;
+}
+
+// A speech recognition result corresponding to a portion of the audio.
+message SpeechRecognitionResult {
+  string text = 1;
+  int64 start_time = 2; // In milliseconds.
+  int64 end_time = 3;
+  bool final = 4;
+}
+
+message Error {
+  int32 code = 1;
+  string message = 2;
+}
