@@ -1,216 +1,308 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CLOVA Speech API Test</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
-        .container { max-width: 800px; margin: auto; }
-        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
-        h2 { border-bottom: 2px solid #007BFF; padding-bottom: 5px; }
-        input[type="file"], button { padding: 10px; margin-top: 10px; }
-        textarea { width: 100%; height: 150px; margin-top: 10px; padding: 10px; border: 1px solid #ccc; }
-        #audio_upload_result, #stream_result { white-space: pre-wrap; background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin-top: 10px; }
-        .status-message { font-weight: bold; margin-top: 10px; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>실시간 음성 스트리밍 테스트</title>
+  <style>
+    :root { --bg:#0b0d10; --panel:#12161b; --text:#e7efff; --muted:#7e8b9f; --acc:#4da3ff; }
+    * { box-sizing: border-box }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif; background:var(--bg); color:var(--text) }
+    header { padding:20px 16px; border-bottom:1px solid #1d2430; background:linear-gradient(180deg,#0f1318,transparent) }
+    main { max-width: 920px; margin: 0 auto; padding: 24px 16px 60px }
+    h1 { margin:0 0 6px; font-size: 22px }
+    p.sub { margin:0; color:var(--muted) }
+    .card { background:var(--panel); border:1px solid #1d2430; border-radius:14px; padding:16px; margin-top:16px; }
+    label { font-size: 14px; color: var(--muted); display:block; margin-bottom:6px }
+    input[type="text"], select {
+      width:100%; background:#0e1217; color:var(--text); border:1px solid #1f2633; border-radius:10px;
+      padding:10px 12px; font-size:14px; outline:none;
+    }
+    .row { display:grid; grid-template-columns: 1fr 200px; gap:12px }
+    .btns { display:flex; gap:10px; margin-top:12px }
+    button {
+      cursor:pointer; border:1px solid #243145; background:#162033; color:#cfe4ff; border-radius:12px;
+      padding:10px 14px; font-weight:600; transition: transform .02s ease-in-out, background .2s;
+    }
+    button:hover { background:#1b2a41 }
+    button:active { transform: translateY(1px) }
+    button[disabled] { opacity:.5; cursor:not-allowed }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0a0e14; color:#8fbcff;
+      border:1px solid #1c2433; border-radius:12px; padding:12px; min-height:160px; white-space:pre-wrap; overflow:auto }
+    .status { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; margin:6px 0 0 }
+    .dot { width:10px; height:10px; border-radius:50%; background:#5a6473 }
+    .dot.on { background:#32d74b; box-shadow:0 0 0 3px rgba(50,215,75,.12) }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#0e1829; border:1px solid #20314a; color:#b8d7ff; font-size:12px }
+    .result { background:#0c1118; border:1px dashed #223146; border-radius:12px; padding:12px; margin-top:10px }
+    .final { color:#d7ffe3 }
+    .interim { color:#b8d7ff }
+    .footer { margin-top:16px; font-size:13px; color:#92a2ba }
+    a { color:var(--acc); text-decoration:none }
+    .links { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px }
+  </style>
 </head>
 <body>
+  <header>
+    <h1>🎙️ 실시간 음성 스트리밍 테스트</h1>
+    <p class="sub">마이크 → 16k PCM → WebSocket(<code>/ws/transcribe/stream</code>) → 인식 결과 표시</p>
+  </header>
 
-<div class="container">
-    <h1>CLOVA Speech API 테스트 페이지</h1>
+  <main>
+    <div class="card">
+      <div class="row">
+        <div>
+          <label>WebSocket URL (자동 완성됨, 필요시 수정)</label>
+          <input id="wsUrl" type="text" spellcheck="false" />
+        </div>
+        <div>
+          <label>언어(Language)</label>
+          <select id="lang">
+            <option value="ko-KR" selected>ko-KR (Korean)</option>
+            <option value="en-US">en-US (English)</option>
+            <option value="ja">ja (Japanese)</option>
+            <option value="zh-CN">zh-CN (Chinese Simplified)</option>
+            <option value="zh-TW">zh-TW (Chinese Traditional)</option>
+          </select>
+        </div>
+      </div>
 
-    <div class="section">
-        <h2>실시간 음성 스트리밍 (WebSocket)</h2>
-        <p>마이크를 통해 음성을 입력하면 실시간으로 텍스트로 변환됩니다. '시작' 버튼을 누르면 인식이 시작됩니다.</p>
-        <button id="startStreamBtn">음성 인식 시작</button>
-        <button id="stopStreamBtn" disabled>음성 인식 중지</button>
-        <div class="status-message" id="streamStatus">대기 중...</div>
-        <textarea id="stream_result" placeholder="실시간 변환 결과가 여기에 표시됩니다."></textarea>
+      <div class="btns">
+        <button id="btnStart">🎤 Start</button>
+        <button id="btnStop" disabled>⏹ Stop</button>
+        <span class="status"><span id="wsDot" class="dot"></span> <span id="wsStatus">Disconnected</span></span>
+        <span class="pill" id="fmtInfo">PCM: 16kHz • mono • S16LE</span>
+      </div>
+
+      <div class="result" id="resultBox">
+        <div><strong>결과(실시간):</strong></div>
+        <div id="final" class="final"></div>
+        <div id="interim" class="interim"></div>
+      </div>
+
+      <div style="margin-top:10px">
+        <label>이벤트 로그</label>
+        <div id="log" class="log"></div>
+      </div>
+
+      <div class="footer">
+        유용한 링크:
+        <div class="links">
+          <a href="/docs" target="_blank">Swagger (/docs)</a>
+          <a href="/redoc" target="_blank">ReDoc (/redoc)</a>
+          <a href="/healthz" target="_blank">Health Check</a>
+        </div>
+      </div>
     </div>
-    
-    <div class="section">
-        <h2>음성 파일 변환 (File Upload)</h2>
-        <p>음성 파일을 선택한 후 '변환 요청' 버튼을 누르면 변환 결과가 반환됩니다.</p>
-        <input type="file" id="audioUploadInput" accept="audio/*,video/*">
-        <button id="uploadBtn">변환 요청</button>
-        <div class="status-message" id="uploadStatus">대기 중...</div>
-        <textarea id="audio_upload_result" placeholder="파일 변환 결과가 여기에 표시됩니다."></textarea>
-    </div>
-</div>
+  </main>
 
-<script>
-    // 오디오 스트리밍 관련 변수
+  <script>
+    // ------------ UI refs ------------
+    const wsUrlEl   = document.getElementById('wsUrl');
+    const langEl    = document.getElementById('lang');
+    const btnStart  = document.getElementById('btnStart');
+    const btnStop   = document.getElementById('btnStop');
+    const wsDot     = document.getElementById('wsDot');
+    const wsStatus  = document.getElementById('wsStatus');
+    const logEl     = document.getElementById('log');
+    const finalEl   = document.getElementById('final');
+    const interimEl = document.getElementById('interim');
+
+    // ------------ State ------------
     let ws = null;
-    let recognitionInProgress = false;
-    let audioContext;
-    let mediaStreamSource;
-    let scriptNode;
+    let audioCtx = null;
+    let workletNode = null;
+    let stream = null;
+    let useProcessorFallback = false; // AudioWorklet 미지원 시 ScriptProcessor 대체
 
-    // 스트리밍 시작 함수
-    document.getElementById('startStreamBtn').addEventListener('click', async () => {
-        if (recognitionInProgress) return;
-
-        const statusMessage = document.getElementById('streamStatus');
-        const resultTextarea = document.getElementById('stream_result');
-        const startBtn = document.getElementById('startStreamBtn');
-        const stopBtn = document.getElementById('stopStreamBtn');
-
-        try {
-            statusMessage.textContent = '마이크 접근 허용을 기다리는 중...';
-            // 마이크 접근 요청
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-            statusMessage.textContent = '서버에 연결 중...';
-            // WebSocket 연결
-            ws = new WebSocket(`ws://${window.location.host}/ws/transcribe/stream`);
-            
-            ws.onopen = () => {
-                statusMessage.textContent = '연결 성공! 음성 인식을 시작합니다...';
-                recognitionInProgress = true;
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-
-                // AudioContext와 MediaStreamSource 생성
-                audioContext = new AudioContext({ sampleRate: 16000 });
-                mediaStreamSource = audioContext.createMediaStreamSource(stream);
-                
-                // ScriptProcessorNode를 이용해 오디오 데이터 처리
-                scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
-                
-                scriptNode.onaudioprocess = (audioProcessingEvent) => {
-                    if (!recognitionInProgress) return;
-                    const inputBuffer = audioProcessingEvent.inputBuffer;
-                    const pcmData = new Int16Array(inputBuffer.getChannelData(0).length);
-                    
-                    // Float32 데이터를 Int16로 변환
-                    const channelData = inputBuffer.getChannelData(0);
-                    for (let i = 0; i < channelData.length; i++) {
-                        pcmData[i] = Math.min(1, channelData[i]) * 0x7FFF;
-                    }
-                    
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(pcmData.buffer);
-                    }
-                };
-
-                // 노드 연결
-                mediaStreamSource.connect(scriptNode);
-                scriptNode.connect(audioContext.destination);
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.text) {
-                    if (data.is_final) {
-                        resultTextarea.value += data.text + '\n';
-                    } else {
-                        // 최종 결과가 아닐 경우, 이전 줄을 덮어씁니다.
-                        const lines = resultTextarea.value.split('\n');
-                        lines[lines.length - 1] = data.text;
-                        resultTextarea.value = lines.join('\n');
-                    }
-                } else if (data.error) {
-                    statusMessage.textContent = `오류: ${data.error}`;
-                    stopStreaming();
-                }
-            };
-
-            ws.onclose = () => {
-                statusMessage.textContent = '연결이 종료되었습니다.';
-                stopStreaming();
-            };
-
-            ws.onerror = (error) => {
-                statusMessage.textContent = '연결 오류 발생.';
-                console.error('WebSocket Error:', error);
-                stopStreaming();
-            };
-
-        } catch (error) {
-            statusMessage.textContent = `오류 발생: 마이크 접근 실패 또는 서버 연결 오류.`;
-            console.error('WebSocket Connection Error:', error);
-            stopStreaming();
-        }
-    });
-
-    // 스트리밍 중지 함수
-    document.getElementById('stopStreamBtn').addEventListener('click', stopStreaming);
-
-    function stopStreaming() {
-        if (!recognitionInProgress) return;
-
-        if (ws) {
-            ws.close();
-        }
-        if (audioContext && audioContext.state !== 'closed') {
-            audioContext.close();
-        }
-        recognitionInProgress = false;
-        document.getElementById('streamStatus').textContent = '대기 중...';
-        document.getElementById('startStreamBtn').disabled = false;
-        document.getElementById('stopStreamBtn').disabled = true;
+    function log(msg) {
+      const now = new Date().toLocaleTimeString();
+      logEl.textContent += `[${now}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setWS(on) {
+      wsDot.classList.toggle('on', !!on);
+      wsStatus.textContent = on ? 'Connected' : 'Disconnected';
+    }
+    function defaultWsUrl(lang) {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      // 같은 호스트 기준 상대 경로로 /ws/transcribe/stream 사용
+      return `${proto}://${location.host}/ws/transcribe/stream?lang=${encodeURIComponent(lang)}`;
     }
 
-    // 파일 업로드 관련 함수
-    document.getElementById('uploadBtn').addEventListener('click', async () => {
-        const fileInput = document.getElementById('audioUploadInput');
-        const statusMessage = document.getElementById('uploadStatus');
-        const resultTextarea = document.getElementById('audio_upload_result');
-        const file = fileInput.files[0];
-
-        if (!file) {
-            alert('음성 파일을 선택해주세요.');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('media', file);
-        formData.append('language', 'ko-KR');
-        formData.append('completion', 'async');
-
-        statusMessage.textContent = '파일 업로드 및 변환 요청 중...';
-        resultTextarea.value = '';
-
-        try {
-            const response = await fetch('/api/transcribe/upload', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || `HTTP Error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            const token = data.token;
-            statusMessage.textContent = `요청 성공! 토큰: ${token}. 결과를 조회합니다...`;
-
-            // 상태 조회 루프
-            const checkStatus = setInterval(async () => {
-                const statusResponse = await fetch(`/api/transcribe/status/${token}`);
-                const statusData = await statusResponse.json();
-                
-                if (statusData.status === 'RUNNING') {
-                    statusMessage.textContent = `작업 진행 중...`;
-                } else if (statusData.status === 'COMPLETED') {
-                    clearInterval(checkStatus);
-                    statusMessage.textContent = `작업 완료!`;
-                    resultTextarea.value = JSON.stringify(statusData, null, 2);
-                } else if (statusData.status === 'FAILED') {
-                    clearInterval(checkStatus);
-                    statusMessage.textContent = `작업 실패!`;
-                    resultTextarea.value = JSON.stringify(statusData, null, 2);
-                }
-            }, 2000); // 2초마다 상태 체크
-
-        } catch (error) {
-            statusMessage.textContent = `오류: ${error.message}`;
-            console.error('File Upload Error:', error);
-        }
+    // 초기 URL 채우기
+    wsUrlEl.value = defaultWsUrl(langEl.value);
+    langEl.addEventListener('change', () => {
+      // 언어 바꾸면 URL도 업데이트
+      try {
+        const u = new URL(wsUrlEl.value);
+        u.searchParams.set('lang', langEl.value);
+        wsUrlEl.value = u.toString();
+      } catch {
+        wsUrlEl.value = defaultWsUrl(langEl.value);
+      }
     });
-</script>
 
+    async function start() {
+      btnStart.disabled = true; btnStop.disabled = false;
+      finalEl.textContent = ''; interimEl.textContent = '';
+      const url = wsUrlEl.value.trim();
+
+      // 1) WebSocket 연결
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { setWS(true); log('WS ✅ connected'); };
+      ws.onclose = () => { setWS(false); log('WS ❌ closed'); stop(true); };
+      ws.onerror = (e) => { log('WS error: ' + e.message || e); };
+      ws.onmessage = (e) => {
+        try {
+          const obj = JSON.parse(e.data);
+          if (obj.error) {
+            log('Server error: ' + obj.error);
+            return;
+          }
+          // 서버가 { text, is_final } 형태로 보냄
+          if (obj.text !== undefined) {
+            if (obj.is_final) {
+              // 최종 문장 누적
+              finalEl.textContent = (finalEl.textContent + ' ' + obj.text).trim();
+              interimEl.textContent = '';
+            } else {
+              // 중간(부분) 결과
+              interimEl.textContent = obj.text;
+            }
+          } else {
+            log('RX: ' + e.data);
+          }
+        } catch {
+          // 바이너리/텍스트 혼합일 경우
+          log('RX(bin): ' + (e.data && e.data.byteLength ? e.data.byteLength+'B' : 'text'));
+        }
+      };
+
+      // 2) 마이크 캡처
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true },
+          video: false
+        });
+      } catch (err) {
+        log('마이크 권한 실패: ' + err);
+        stop();
+        return;
+      }
+
+      // 3) 오디오 컨텍스트 & 변환 파이프라인
+      const SR_OUT = 16000;
+
+      try {
+        // AudioWorklet 우선
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const workletCode = `
+          class Downsample16kProcessor extends AudioWorkletProcessor {
+            constructor() {
+              super();
+              this._ratio = sampleRate / 16000;
+              this._acc = 0;
+              this._cnt = 0;
+            }
+            process(inputs) {
+              const input = inputs[0];
+              if (!input || input.length === 0) return true;
+              const ch = input[0];
+              if (!ch) return true;
+
+              // 간단 평균 다운샘플링 → S16LE
+              const inData = ch;
+              const outLen = Math.floor(inData.length / this._ratio);
+              const out = new Int16Array(outLen);
+              let o = 0;
+              for (let i=0;i<inData.length;i++) {
+                this._acc += inData[i];
+                this._cnt++;
+                if (this._cnt >= this._ratio) {
+                  const sample = this._acc / this._cnt;
+                  const s = Math.max(-1, Math.min(1, sample));
+                  out[o++] = (s * 32767) | 0;
+                  this._acc = 0; this._cnt = 0;
+                }
+              }
+              const ab = out.buffer;
+              this.port.postMessage(ab, [ab]);
+              return true;
+            }
+          }
+          registerProcessor('downsample-16k', Downsample16kProcessor);
+        `;
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const modUrl = URL.createObjectURL(blob);
+        await audioCtx.audioWorklet.addModule(modUrl);
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        workletNode = new AudioWorkletNode(audioCtx, 'downsample-16k');
+        workletNode.port.onmessage = (e) => {
+          if (ws && ws.readyState === 1) ws.send(e.data); // ArrayBuffer
+        };
+
+        source.connect(workletNode);
+        // 모니터링 원치 않으면 출력 연결 생략
+        // workletNode.connect(audioCtx.destination);
+
+        log(`AudioWorklet on. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE`);
+      } catch (err) {
+        // AudioWorklet 미지원 → ScriptProcessorNode 대체 (deprecated이지만 폭넓은 호환)
+        useProcessorFallback = true;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const ratio = audioCtx.sampleRate / SR_OUT;
+        let acc = 0, cnt = 0;
+
+        processor.onaudioprocess = (ev) => {
+          const input = ev.inputBuffer.getChannelData(0);
+          const outLen = Math.floor(input.length / ratio);
+          const out = new Int16Array(outLen);
+          let o = 0;
+          for (let i=0;i<input.length;i++) {
+            acc += input[i];
+            cnt++;
+            if (cnt >= ratio) {
+              const s = Math.max(-1, Math.min(1, acc / cnt));
+              out[o++] = (s * 32767) | 0;
+              acc = 0; cnt = 0;
+            }
+          }
+          if (ws && ws.readyState === 1) ws.send(out.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination); // 필요 없으면 끊어도 됨
+        log(`AudioWorklet fallback. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE`);
+      }
+
+      log("🎙️ 스트리밍 시작 — 말해보세요!");
+    }
+
+    async function stop(silent=false) {
+      btnStart.disabled = false; btnStop.disabled = true;
+      if (!silent) log('정지 중…');
+
+      try { if (workletNode) workletNode.disconnect(); } catch {}
+      workletNode = null;
+
+      try { if (audioCtx) await audioCtx.close(); } catch {}
+      audioCtx = null;
+
+      try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch {}
+      stream = null;
+
+      try { if (ws && ws.readyState === 1) ws.close(); } catch {}
+      ws = null;
+
+      if (!silent) log('🔚 stopped');
+    }
+
+    btnStart.addEventListener('click', start);
+    btnStop.addEventListener('click', () => stop(false));
+  </script>
 </body>
 </html>
