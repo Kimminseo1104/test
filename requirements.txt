@@ -28,5 +28,5 @@ typing-inspection==0.4.1
 # --- gRPC & Protobuf (핵심) ---
 grpcio==1.75.1
 grpcio-tools==1.75.1
-protobuf==6.33.0
+protobuf==6.32.1
 googleapis-common-protos==1.66.0
