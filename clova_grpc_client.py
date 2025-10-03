@@ -13,7 +13,11 @@ class ClovaSpeechClient:
     - 경로 고정: /ncloud.ai.clovaspeech.v1.ClovaSpeechRecognizer/Recognize
     - 첫 메시지: RecognitionConfig (encoding=LINEAR16, 16kHz, language)
     - 이후: audio_content (PCM 16kHz mono S16LE)
-    - 인증: x-clovaspeech-api-key (권장) → 실패 시 NCP API GW 키쌍도 시도
+    - 인증 메타데이터 시도 순서:
+        1) x-ncp-apigw-api-keyid / x-ncp-apigw-api-key (NCP 키쌍)
+        2) x-clovaspeech-api-key (REST Secret Key)
+      ※ 어떤 배포는 인증/헤더 불일치 시 INTERNAL을 반환하기도 하므로,
+        INTERNAL도 인증 계열로 간주해 다음 조합으로 폴백한다.
     """
 
     def __init__(
@@ -44,16 +48,18 @@ class ClovaSpeechClient:
         self.stub = clovaspeech_pb2_grpc.ClovaSpeechRecognizerStub(self.channel)
 
     def _metadata_sets(self) -> Iterable[Tuple[Tuple[str, str], ...]]:
-        # 1) 콘솔 Secret Key 1개 (가장 보편적)
-        if self.clova_secret_key:
-            yield (("x-clovaspeech-api-key", self.clova_secret_key),)
-
-        # 2) NCP API Gateway 키쌍 (환경에 따라 요구될 수 있음)
+        """
+        인증 헤더 후보(모두 '소문자' 키):
+        1) NCP 키쌍을 먼저 시도
+        2) Secret Key 단일 헤더를 다음에 시도
+        """
         if self.client_id and self.client_secret:
             yield (
                 ("x-ncp-apigw-api-keyid", self.client_id),
                 ("x-ncp-apigw-api-key", self.client_secret),
             )
+        if self.clova_secret_key:
+            yield (("x-clovaspeech-api-key", self.clova_secret_key),)
 
     async def _request_iter(
         self, audio_q: asyncio.Queue, language: str
@@ -94,8 +100,9 @@ class ClovaSpeechClient:
             except grpc.aio.AioRpcError as e:
                 last_error = e
                 code = e.code().name
-                # 인증 문제면 다음 메타데이터 조합으로 시도
-                if code in ("UNAUTHENTICATED", "PERMISSION_DENIED"):
+                # 어떤 배포는 인증/권한 문제를 INTERNAL로 반환하기도 함.
+                # → 인증 계열로 간주하고 다음 메타데이터 조합으로 폴백
+                if code in ("UNAUTHENTICATED", "PERMISSION_DENIED", "INTERNAL"):
                     continue
                 # 메서드 없음(UNIMPLEMENTED)이나 그 외 오류면 즉시 전달
                 raise
