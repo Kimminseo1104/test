@@ -233,7 +233,11 @@ async def websocket_transcribe_stream(websocket: WebSocket, lang: str = "ko-KR")
 
     try:
         # 1) gRPC 클라이언트 초기화
-        grpc_client = ClovaSpeechClient(CLOVA_CLIENT_ID, CLOVA_CLIENT_SECRET)
+        grpc_client = ClovaSpeechClient(
+            CLOVA_CLIENT_ID,
+            CLOVA_CLIENT_SECRET,
+            clova_secret_key=CLOVA_SECRET_KEY,  
+        )
 
         # 2) gRPC 응답을 WebSocket으로 relay
         async def response_handler():
