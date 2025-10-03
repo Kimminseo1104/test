@@ -1,35 +1,32 @@
-# FastAPI and Uvicorn
+# --- FastAPI stack ---
 fastapi==0.118.0
+starlette==0.48.0
 uvicorn==0.37.0
 gunicorn==22.0.0
 
-# Image Upload Dependencies
+# --- File upload / images ---
 python-multipart==0.0.9
 Pillow==10.4.0
 
-# --- 추가된 라이브러리 ---
-# For calling external APIs (CLOVA Speech)
+# --- HTTP client & env ---
 httpx==0.27.0
-
-# For managing environment variables
 python-dotenv==1.0.1
 
-# Pydantic is already a dependency of FastAPI, but explicitly listing it is fine
+# --- Pydantic (FastAPI 런타임 호환) ---
 pydantic==2.11.9
-
-# --- gRPC 라이브러리 추가 ---
-grpcio==1.62.2
-grpcio-tools==1.62.2
-
-# --- 기존 라이브러리 ---
+pydantic_core==2.33.2
+typing_extensions==4.15.0
 annotated-types==0.7.0
 anyio==4.11.0
-click==8.3.0
-colorama==0.4.6
 h11==0.16.0
 idna==3.10
-pydantic_core==2.33.2
 sniffio==1.3.1
-starlette==0.48.0
+click==8.3.0
+colorama==0.4.6
 typing-inspection==0.4.1
-typing_extensions==4.15.0
+
+# --- gRPC & Protobuf (여기가 핵심) ---
+grpcio==1.75.1
+grpcio-tools==1.75.1
+protobuf==5.27.3
+googleapis-common-protos==1.65.0
