@@ -18,7 +18,7 @@ pydantic==2.11.9
 
 # --- gRPC 라이브러리 추가 ---
 # grpcio==1.62.2
-grpcio-tools==1.62.2
+# grpcio-tools==1.62.2
 
 # --- 기존 라이브러리 ---
 annotated-types==0.7.0
