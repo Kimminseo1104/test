@@ -15,7 +15,7 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 import asyncio
-import grpc  # ✅ AioRpcError 등 사용
+import grpc  #  AioRpcError 등 사용
 
 from clova_grpc_client import ClovaSpeechClient
 
