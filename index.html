@@ -143,7 +143,7 @@
         t=setTimeout(()=>{ fn.apply(lastThis, lastArgs); }, delay);
       };
     }
-    const updateInterim = debounce((txt)=>{ interimEl.textContent = txt; }, 120);
+    const updateInterim = debounce((txt)=>{ interimEl.textContent = txt; }, 200);
 
     function showErr(msg) { bannerErr.style.display='block'; bannerErr.textContent = '⚠ ' + msg; }
     function hideErr()    { bannerErr.style.display='none'; bannerErr.textContent = ''; }
@@ -240,7 +240,7 @@
       const SR_OUT = 16000;
       const FRAME_SAMPLES = 320;      // 20ms @16k
       const FRAME_BYTES   = FRAME_SAMPLES * 2; // 640B
-      const PACK_FRAMES   = 5;         // ✅ 100ms 배치(원하면 10으로 늘려 200ms도 가능)
+      const PACK_FRAMES   = 15;         // 
 
       try {
         // AudioWorklet (권장)
@@ -402,3 +402,4 @@
   </script>
 </body>
 </html>
+
