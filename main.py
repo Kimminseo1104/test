@@ -221,10 +221,6 @@ async def transcribe_status(token: str):
 # =====================================================================================
 @app.websocket("/ws/transcribe/stream")
 async def websocket_transcribe_stream(websocket: WebSocket, lang: str = "ko-KR"):
-    """
-    WebSocket으로 16kHz S16LE PCM 바이너리를 받아 gRPC(NestService)로 전달하고
-    인식 결과를 WebSocket JSON으로 반환.
-    """
     await websocket.accept()
 
     grpc_client = None
@@ -232,43 +228,51 @@ async def websocket_transcribe_stream(websocket: WebSocket, lang: str = "ko-KR")
     response_task: asyncio.Task | None = None
 
     try:
-        # ✅ NestService 클라이언트 초기화 (Bearer Secret만 필요)
+        # ✅ NestService 클라이언트
         if not CLOVA_SECRET_KEY:
-            raise RuntimeError("환경변수 CLOVA_SECRET_KEY 가 설정되지 않았습니다.")
+            raise RuntimeError("CLOVA_SECRET_KEY 환경변수가 필요합니다.")
         grpc_client = ClovaSpeechClient(secret_key=CLOVA_SECRET_KEY)
 
-        # ✅ 서버가 기대하는 CONFIG(JSON) 구성
-        # 실제 서버 스키마가 따로 있으면 그대로 맞춰주세요.
+        # ✅ 자바 예제와 동일한 CONFIG 구조(camelCase, 중첩)
         config_json = (
             '{'
-            f'"language":"{lang}",'
-            '"encoding":"LINEAR16",'
-            '"sample_rate_hertz":16000,'
-            '"word_alignment":true,'
-            '"full_text":true'
+            f'"transcription":{{"language":"{lang.split("-")[0]}"}}'  # "ko-KR" -> "ko"
+            ',"semanticEpd":{"skipEmptyText":false,"useWordEpd":false,"usePeriodEpd":true}'
             '}'
         )
 
-        # gRPC 응답을 WebSocket으로 relay
         async def response_handler():
             try:
-                async for response in grpc_client.recognize(audio_queue, config_json=config_json):
-                    # NestResponse.contents: string
+                async for response in grpc_client.recognize(
+                    audio_queue, config_json=config_json, language=lang
+                ):
                     contents = getattr(response, "contents", "")
                     if not contents:
                         continue
-                    # JSON이면 파싱해 {text, is_final} 처리, 아니면 원문 반출
+
+                    # 서버가 보내는 JSON: {"transcription":{"text":"...","final":true/false}}
                     try:
                         payload = json.loads(contents)
-                        if isinstance(payload, dict) and ("text" in payload):
-                            await websocket.send_json({
-                                "text": payload.get("text", ""),
-                                "is_final": bool(payload.get("is_final", False)),
-                            })
-                        else:
-                            await websocket.send_json({"text": contents, "is_final": False})
+                        if isinstance(payload, dict):
+                            tr = payload.get("transcription")
+                            if isinstance(tr, dict) and "text" in tr:
+                                await websocket.send_json({
+                                    "text": tr.get("text", ""),
+                                    "is_final": bool(tr.get("final", False)),
+                                })
+                                continue
+                            # 평면 {text,is_final}도 허용
+                            if "text" in payload:
+                                await websocket.send_json({
+                                    "text": payload.get("text", ""),
+                                    "is_final": bool(payload.get("is_final", False)),
+                                })
+                                continue
+                        # 알 수 없는 구조면 원문 로그로 보냄
+                        await websocket.send_json({"debug": contents})
                     except Exception:
-                        await websocket.send_json({"text": contents, "is_final": False})
+                        await websocket.send_json({"debug": contents})
+
             except grpc.aio.AioRpcError as e:
                 msg = f"gRPC Error: {e.details()} (code: {e.code().name})"
                 print(msg)
@@ -276,29 +280,24 @@ async def websocket_transcribe_stream(websocket: WebSocket, lang: str = "ko-KR")
                     await websocket.send_json({"error": msg})
                 except Exception:
                     pass
-            except Exception as e:
-                print(f"Response handler error: {e}")
 
         response_task = asyncio.create_task(response_handler())
 
-        # WebSocket 수신 루프: 바이너리 오디오를 큐로 전달
+        # 바이너리 오디오 수신 → 큐로 전달
         while True:
             message = await websocket.receive()
             if "bytes" in message:
                 await audio_queue.put(message["bytes"])
-            # 텍스트/핑퐁 등은 무시
+            # 텍스트/핑퐁은 무시
 
     except WebSocketDisconnect:
         await audio_queue.put(None)
-        print("WebSocket disconnected.")
     except Exception as e:
-        print(f"An error occurred: {e}")
         try:
             await websocket.send_json({"error": str(e)})
         except Exception:
             pass
     finally:
-        # 정리
         try:
             await audio_queue.put(None)
         except Exception:
