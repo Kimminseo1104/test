@@ -251,7 +251,7 @@ async def websocket_transcribe_stream(websocket: WebSocket, lang: str = "ko-KR")
         config_json = (
             '{'
             f'"transcription":{{"language":"{lang_short}"}},'
-            '"semanticEpd":{"skipEmptyText":true,"useWordEpd":false,"usePeriodEpd":false}'
+            '"semanticEpd":{"skipEmptyText":true,"useWordEpd":false,"usePeriodEpd":true}'
             '}'
         )
 
