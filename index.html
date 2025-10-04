@@ -49,7 +49,7 @@
 <body>
   <header>
     <h1>🎙️ 실시간 음성 스트리밍 테스트</h1>
-    <p class="sub">마이크 → 16k PCM(<b>20ms×30 = 600ms 배치</b>) → WebSocket(<code>/ws/transcribe/stream</code>) → 인식 결과</p>
+    <p class="sub">마이크 → 16k PCM(<b>20ms×5 = 100ms 배치</b>) → WebSocket(<code>/ws/transcribe/stream</code>) → 인식 결과</p>
   </header>
 
   <main>
@@ -78,7 +78,7 @@
         <button id="btnStart">🎤 Start</button>
         <button id="btnStop" disabled>⏹ Stop</button>
         <span class="status"><span id="wsDot" class="dot"></span> <span id="wsStatus">Disconnected</span></span>
-        <span class="pill" id="fmtInfo">PCM: 16kHz • mono • S16LE • 600ms batch</span>
+        <span class="pill" id="fmtInfo">PCM: 16kHz • mono • S16LE • 100ms batch</span>
       </div>
 
       <div class="metrics">
@@ -110,14 +110,14 @@
   </main>
 
   <script>
-    // ===== Constants (조정 포인트) =====
-    const SR_OUT = 16000;                 // 출력 샘플레이트
-    const FRAME_MS = 20;                  // 20ms 프레임
-    const FRAME_SAMPLES = 320;            // 20ms @16k
-    const FRAME_BYTES = FRAME_SAMPLES * 2;// S16LE => 640B
-    const PACK_FRAMES = 30;               // 20ms × 30 = 600ms
-    const BATCH_BYTES_LIMIT = 600 * 1024; // 600KB
-    const SEND_BACKPRESSURE_BYTES = 1 * 1024 * 1024; // 1MB
+
+
+
+
+
+
+
+
 
     // ------------ UI refs ------------
     const wsUrlEl   = document.getElementById('wsUrl');
@@ -144,15 +144,15 @@
     let startTs = 0, timerId = null, sentBytes = 0, lastBytes = 0;
 
     // ------------ Utils ------------
-    function debounce(fn, delay=250) {
-      let t=null, lastArgs=null, lastThis=null;
+    function debounce(fn, delay=120) {
+      let t = null, lastArgs=null, lastThis=null;
       return function(...args){
         lastArgs=args; lastThis=this;
         clearTimeout(t);
         t=setTimeout(()=>{ fn.apply(lastThis, lastArgs); }, delay);
       };
     }
-    const updateInterim = debounce((txt)=>{ interimEl.textContent = txt; }, 250);
+    const updateInterim = debounce((txt)=>{ interimEl.textContent = txt; }, 200);
 
     function showErr(msg) { bannerErr.style.display='block'; bannerErr.textContent = '⚠ ' + msg; }
     function hideErr()    { bannerErr.style.display='none'; bannerErr.textContent = ''; }
@@ -161,6 +161,7 @@
     function log(msg) {
       const now = new Date().toLocaleTimeString();
       logEl.textContent += `[${now}] ${msg}\n`;
+      // 로그 길이 제한(최근 300줄 유지)
       const lines = logEl.textContent.split('\n');
       if (lines.length > 300) logEl.textContent = lines.slice(-300).join('\n');
       logEl.scrollTop = logEl.scrollHeight;
@@ -220,7 +221,8 @@
               finalEl.textContent = (finalEl.textContent + ' ' + obj.text).trim();
               interimEl.textContent = '';
             } else {
-              updateInterim(obj.text); // 디바운스
+              // ✅ 디바운스된 interim 업데이트
+              updateInterim(obj.text);
             }
           } else {
             log('RX: ' + e.data);
@@ -243,7 +245,12 @@
         return;
       }
 
-      // 3) 오디오 컨텍스트 & 변환 파이프라인 (48k → 16k, 20ms × 30 = 600ms 배치, S16LE)
+      // 3) 오디오 컨텍스트 & 변환 파이프라인 (48k → 16k, 20ms 프레임 × 5개 배치, S16LE)
+      const SR_OUT = 16000;
+      const FRAME_SAMPLES = 320;      // 20ms @16k
+      const FRAME_BYTES   = FRAME_SAMPLES * 2; // 640B
+      const PACK_FRAMES   = 15;         // 
+
       try {
         // AudioWorklet (권장)
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
@@ -253,28 +260,35 @@
               super();
               this._ratio = sampleRate/16000;
               this._acc = 0; this._cnt = 0;
-              this._buf = [];                // float @16k 임시 버퍼
-              this._FRAME = ${FRAME_SAMPLES};
-              this._PACK_FRAMES = ${PACK_FRAMES};
-              this._pending = [];            // ArrayBuffer(640B) 목록
+              this._buf = [];                 // float @16k를 임시로 쌓는 버퍼
+              this._FRAME = 320;              // 20ms @16k
+              this._PACK_FRAMES = ${PACK_FRAMES}; // 배치 개수
+              this._pending = [];             // ArrayBuffer(640B) 목록
             }
             process(inputs){
               const input = inputs[0]; if(!input || input.length===0) return true;
               const ch = input[0]; if(!ch) return true;
               const inData = ch;
+
               for(let i=0;i<inData.length;i++){
-                this._acc += inData[i]; this._cnt++;
+                this._acc += inData[i];
+                this._cnt++;
                 if(this._cnt >= this._ratio){
                   const s = Math.max(-1, Math.min(1, this._acc / this._cnt));
-                  this._buf.push(s); this._acc = 0; this._cnt = 0;
+                  this._buf.push(s);
+                  this._acc = 0; this._cnt = 0;
+
                   if(this._buf.length >= this._FRAME){
-                    const frame = this._buf.splice(0, this._FRAME);
-                    const bytes = new ArrayBuffer(this._FRAME * 2);
+                    const needed = this._FRAME;
+                    const frame = this._buf.splice(0, needed);
+                    // Float → S16LE 변환
+                    const bytes = new ArrayBuffer(needed * 2);
                     const view = new DataView(bytes);
-                    for(let j=0;j<this._FRAME;j++){
+                    for(let j=0;j<needed;j++){
                       const v = Math.max(-1, Math.min(1, frame[j]));
                       view.setInt16(j*2, (v*32767)|0, true);
                     }
+                    // ✅ 배치 전송
                     this._pending.push(bytes);
                     if (this._pending.length >= this._PACK_FRAMES){
                       let total = 0;
@@ -306,18 +320,18 @@
 
         workletNode.port.onmessage = (e) => {
           if (ws && ws.readyState === 1) {
-            if (ws.bufferedAmount > SEND_BACKPRESSURE_BYTES) return; // 혼잡 제어
-            // 600ms 묶음(기본 640B * 30 = 19,200B)
-            // 필요하면 더 큰 멀티-배치를 위해 여기서 BATCH_BYTES_LIMIT로 한 번 더 묶을 수도 있음
-            ws.send(e.data);
+            // 네트워크 버퍼 혼잡 방지
+            if (ws.bufferedAmount > 512 * 1024) return;
+            ws.send(e.data);                  // 100ms 묶음(기본 3200B)
+
             sentBytes += (e.data?.byteLength || 0);
           }
         };
 
         source.connect(workletNode);
-        log(`AudioWorklet on. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE (20ms×${PACK_FRAMES}=600ms batch)`);
+        log(`AudioWorklet on. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE (20ms×${PACK_FRAMES}=100ms batch)`);
       } catch (err) {
-        // ScriptProcessor 폴백 (동일하게 600ms 배치 + LE 변환)
+        // ScriptProcessor 폴백 (동일하게 100ms 배치 + LE 변환)
         useProcessorFallback = true;
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
         const source = audioCtx.createMediaStreamSource(stream);
@@ -355,7 +369,7 @@
                   }
                   pending.length = 0;
                   if (ws && ws.readyState === 1) {
-                    if (ws.bufferedAmount > SEND_BACKPRESSURE_BYTES) return;
+                    if (ws.bufferedAmount > 512*1024) return;
                     ws.send(packed.buffer);
                     sentBytes += packed.byteLength;
                   }
@@ -367,7 +381,7 @@
 
         source.connect(processor);
         processor.connect(audioCtx.destination);
-        log(`AudioWorklet fallback. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE (20ms×${PACK_FRAMES}=600ms batch)`);
+        log(`AudioWorklet fallback. in:${audioCtx.sampleRate} → out:${SR_OUT}Hz S16LE (20ms×${PACK_FRAMES}=100ms batch)`);
       }
 
       log("🎙️ 스트리밍 시작 — 말해보세요!");
@@ -389,11 +403,12 @@
       try { if (ws && ws.readyState === 1) ws.close(); } catch {}
       ws = null;
 
+      stopMeter();
       if (!silent) { log('🔚 stopped'); }
-      // meter 정리
-      startTs = 0; sentBytes = 0; lastBytes = 0;
-      const meterId = setInterval(()=>{}, 0); // noop to get id
-      clearInterval(meterId); // just ensure cleared
+
+
+
+
     }
 
     btnStart.addEventListener('click', start);
